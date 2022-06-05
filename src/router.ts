@@ -50,6 +50,8 @@ export async function getAllRouters(
       token: address,
       price,
       volume,
+      round,
+      priceWithVolumePerPool,
     };
   });
 

@@ -6,7 +6,7 @@ import {
   usdStableTokens,
 } from "./tokens";
 import { Token, Protocol } from "./types";
-import { day, secondsPerBlock } from "./constants";
+import { day } from "./constants";
 import { logger } from "./logging";
 import _ from "lodash";
 
@@ -19,7 +19,7 @@ const One = new BigNumber(1);
 
 type PriceWithVolume = {
   price: BigNumber;
-  volume: BigNumber;
+  volume: BigNumber; // the amounts of base token
 };
 
 type DataSource = {
@@ -167,8 +167,8 @@ export class TokenPricing {
           .times(quoteTokenPriceInUSD);
     return {
       round: this.numRounds,
-      price: usdPrice.dp(this.priceDecimals),
-      volume: totalVolume.dp(this.priceDecimals),
+      price: usdPrice,
+      volume: totalVolume,
       priceWithVolumePerPool,
     };
   }
@@ -187,23 +187,23 @@ export class TokenPricing {
         );
       }
       // check reversed token pair again
-      // const reversedKey = this.getTokenPairKey(this.pricingAssets[i], baseToken);
-      // if (reversedKey in this.tokenPrice) {
-      // const reversedPrice = this.processTokenPrice(
-      // this.tokenPrice[reversedKey],
-      // this.pricingAssets[i],
-      // baseToken,
-      // );
-      // // reverse back to price base token using quote token
-      // priceAggregationPerPairs.push(
-      // {
-      // round: reversedPrice.round,
-      // price: reversedPrice.price,
-      // volume: reversedPrice.volume,
-      // priceWithVolumePerPool: reversedPrice.priceWithVolumePerPool,
-      // }
-      // );
-      // }
+      const reversedKey = this.getTokenPairKey(
+        this.pricingAssets[i],
+        baseToken
+      );
+      if (reversedKey in this.tokenPrice) {
+        const reversedTokenPrice = this.tokenPrice[reversedKey];
+        const tokenPrice = reversedTokenPrice.map((item) => {
+          return {
+            ...item,
+            price: One.div(item.price),
+            volume: item.volume.times(item.price),
+          };
+        });
+        priceAggregationPerPairs.push(
+          this.processTokenPrice(tokenPrice, baseToken, this.pricingAssets[i])
+        );
+      }
     }
     if (!priceAggregationPerPairs.length) {
       return {
@@ -232,7 +232,7 @@ export class TokenPricing {
     return {
       round: this.numRounds,
       price: weightedPrice.dp(this.priceDecimals),
-      volume: totalVolume,
+      volume: totalVolume.dp(this.priceDecimals),
       priceWithVolumePerPool,
     };
   }
@@ -312,10 +312,20 @@ export class TokenPricing {
       this.historyUSDPrice[toTokenAddr] = toTokenHistory;
       // start next round
       this.tokenPrice[this.getTokenPairKey(toTokenAddr, fromTokenAddr)] = [
-        { price: newToTokenPrice, volume: amountBought, address, protocol },
+        {
+          price: newToTokenPrice,
+          volume: amountBought,
+          address,
+          protocol,
+        },
       ];
       this.tokenPrice[this.getTokenPairKey(fromTokenAddr, toTokenAddr)] = [
-        { price: newFromTokenPrice, volume: amountSold, address, protocol },
+        {
+          price: newFromTokenPrice,
+          volume: amountSold,
+          address,
+          protocol,
+        },
       ];
 
       // update block number
