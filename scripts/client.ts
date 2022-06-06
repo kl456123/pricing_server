@@ -4,8 +4,10 @@ import { logger } from "../src/logging";
 import { tokensEthereum } from "../src/tokens";
 import { Protocol } from "../src/types";
 
-const url = `http://127.0.0.1:3000`;
-// const url = `http://35.75.165.133:8547`;
+import dotenv from "dotenv";
+dotenv.config();
+
+const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 
 async function requestLatestPrice(query: { address: string }) {
   try {

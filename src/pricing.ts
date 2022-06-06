@@ -186,24 +186,6 @@ export class TokenPricing {
           )
         );
       }
-      // check reversed token pair again
-      const reversedKey = this.getTokenPairKey(
-        this.pricingAssets[i],
-        baseToken
-      );
-      if (reversedKey in this.tokenPrice) {
-        const reversedTokenPrice = this.tokenPrice[reversedKey];
-        const tokenPrice = reversedTokenPrice.map((item) => {
-          return {
-            ...item,
-            price: One.div(item.price),
-            volume: item.volume.times(item.price),
-          };
-        });
-        priceAggregationPerPairs.push(
-          this.processTokenPrice(tokenPrice, baseToken, this.pricingAssets[i])
-        );
-      }
     }
     if (!priceAggregationPerPairs.length) {
       return {
