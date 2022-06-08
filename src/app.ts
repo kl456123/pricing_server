@@ -5,7 +5,8 @@ import { Database } from "./mongodb";
 import { EventSubscriber } from "./event_subscriber";
 import { TokenPricing } from "./pricing";
 import { logger } from "./logging";
-import { Token, DatabaseToken, Protocol } from "./types";
+import { Token, DatabaseToken, DatabasePool, Protocol } from "./types";
+import { balancerV2VaultAddr } from "./constants";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -15,6 +16,7 @@ async function getApp() {
   const options = {
     url: process.env.MAINNET_URL,
     tokenCollectionName: "tokens",
+    poolsCollectionName: "pools",
     dbConnection:
       process.env.DB_CONNECTION ||
       "mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1",
@@ -35,10 +37,15 @@ async function getApp() {
     {},
     options.tokenCollectionName
   );
+
+  const pools: DatabasePool[] = await database.loadMany<DatabasePool>(
+    {},
+    options.poolsCollectionName
+  );
   const tokensMap: Record<string, Token> = {};
   tokens.forEach((token) => {
-    tokensMap[token.id.toLowerCase()] = {
-      address: token.id.toLowerCase(),
+    tokensMap[token.address.toLowerCase()] = {
+      address: token.address.toLowerCase(),
       decimals: token.decimals,
       symbol: token.symbol,
       name: token.name,
@@ -51,6 +58,12 @@ async function getApp() {
     provider,
     fromBlock
   );
+  // register some addresses before start
+  pools
+    .filter((pool) => pool.protocol !== Protocol.BalancerV2)
+    .map((pool) => eventSubscriber.registerPublisher(pool.id));
+  // register balancerv2 using vault address
+  eventSubscriber.registerPublisher(balancerV2VaultAddr);
   eventSubscriber.start();
 
   const router = await getAllRouters(eventSubscriber, tokenPricing);

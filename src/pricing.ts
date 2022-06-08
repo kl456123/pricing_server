@@ -177,7 +177,8 @@ export class TokenPricing {
     const priceAggregationPerPairs: PriceAggregation[] = [];
     for (let i = 0; i < this.pricingAssets.length; ++i) {
       const key = this.getTokenPairKey(baseToken, this.pricingAssets[i]);
-      if (key in this.tokenPrice) {
+      // discard pricing asset when it has no usd price exist
+      if (key in this.tokenPrice && this.pricingAssets[i] in this.usdPrice) {
         priceAggregationPerPairs.push(
           this.processTokenPrice(
             this.tokenPrice[key],

@@ -18,10 +18,18 @@ export type Token = {
 };
 
 export type DatabaseToken = {
-  id: string;
+  address: string;
   symbol: string;
   name: string;
   decimals: number;
+};
+
+export type DatabasePool = {
+  protocol: Protocol;
+  id: string;
+  tokens: string[];
+  liquidity: string[];
+  poolData?: unknown;
 };
 
 export type SwapEvent = {
@@ -31,5 +39,7 @@ export type SwapEvent = {
   toToken: string;
   blockNumber: number;
   protocol: Protocol;
+  logIndex: number;
+  transactionIndex: number;
   address: string;
 };

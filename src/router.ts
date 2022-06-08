@@ -1,8 +1,7 @@
 import Router from "@koa/router";
-import { EventSubscriber, ContractPublisher } from "./event_subscriber";
+import { EventSubscriber } from "./event_subscriber";
 import { TokenPricing } from "./pricing";
 import { logger } from "./logging";
-import { Protocol } from "./types";
 
 export async function getAllRouters(
   eventSuscriber: EventSubscriber,
@@ -16,25 +15,16 @@ export async function getAllRouters(
 
   router.get("/registerListener", async (ctx) => {
     const query = ctx.query;
-    const contractPub: ContractPublisher = {
-      protocol: parseInt(query.protocol as string),
-      address: query.address as string,
-      fromToken: query.fromToken as string | undefined,
-      toToken: query.toToken as string | undefined,
-    };
-    const isRegistered = eventSuscriber.registerPublisher(contractPub);
+    const address = query.address as string;
+    const isRegistered = eventSuscriber.registerPublisher(address);
     if (isRegistered) {
-      const msg = `${contractPub.address}[${
-        Protocol[contractPub.protocol]
-      }] is registered successfully`;
+      const msg = `${address} is registered successfully`;
       logger.info(msg);
       ctx.body = {
         msg,
       };
     } else {
-      const errorMsg = `${contractPub.address}[${
-        Protocol[contractPub.protocol]
-      }] is registered already, ignored`;
+      const errorMsg = `${address} is registered already, ignored`;
       logger.warn(errorMsg);
       ctx.body = {
         msg: errorMsg,
