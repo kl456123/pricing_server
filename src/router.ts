@@ -1,19 +1,20 @@
 import Router from "@koa/router";
-import { EventSubscriber } from "./event_subscriber";
-import { TokenPricing } from "./pricing";
-import { logger } from "./logging";
 
-export async function getAllRouters(
+import { EventSubscriber } from "./event_subscriber";
+import { logger } from "./logging";
+import { TokenPricing } from "./pricing";
+
+export function getAllRouters(
   eventSuscriber: EventSubscriber,
   tokenPricing: TokenPricing
 ) {
   const router = new Router();
 
-  router.get("/", async (ctx) => {
+  router.get("/", (ctx) => {
     ctx.body = "token price reporter server";
   });
 
-  router.get("/registerListener", async (ctx) => {
+  router.get("/registerListener", (ctx) => {
     const query = ctx.query;
     const address = query.address as string;
     const isRegistered = eventSuscriber.registerPublisher(address);
@@ -32,7 +33,7 @@ export async function getAllRouters(
     }
   });
 
-  router.get("/latestPrice", async (ctx) => {
+  router.get("/latestPrice", (ctx) => {
     const address = ctx.query.address as string;
     const { round, price, volume, priceWithVolumePerPool } =
       tokenPricing.getLatestPriceInUSD(address);
@@ -45,7 +46,20 @@ export async function getAllRouters(
     };
   });
 
-  router.get("/historyUSDPrice", async (ctx) => {
+  router.get("/latestVolumeInUSD", (ctx) => {
+    const address = ctx.query.address as string;
+    // zero means no need to confirm
+    const confirmation = ctx.query.confirmation
+      ? parseInt(ctx.query.confirmation as string)
+      : 0;
+    const volumeInUSD = tokenPricing.getLatestVolumeInUSD(
+      address,
+      confirmation
+    );
+    ctx.body = volumeInUSD;
+  });
+
+  router.get("/historyUSDPrice", (ctx) => {
     const address = ctx.query.address as string;
     // const blockNumber = ctx.query.blockNumber as string;
     const historyPrices = tokenPricing.getHistoryUSDPrice(address);

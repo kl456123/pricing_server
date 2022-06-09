@@ -1,14 +1,15 @@
 import { BigNumber } from "bignumber.js";
 import { ethers } from "ethers";
+import _ from "lodash";
+
+import { blocksPerDay, day } from "./constants";
+import { logger } from "./logging";
 import {
   pricingTokens,
   tokensEthereum as tokens,
   usdStableTokens,
 } from "./tokens";
-import { Token, Protocol } from "./types";
-import { day } from "./constants";
-import { logger } from "./logging";
-import _ from "lodash";
+import { Protocol, Token } from "./types";
 
 type TokenMap = {
   [name: string]: Token;
@@ -45,12 +46,18 @@ export type PriceAggregation = {
   }[];
 };
 
+export type DailyPoolSnapshot = {
+  dayID: number;
+  volumeInUSD: BigNumber;
+};
+
 export class TokenPricing {
   // params
   protected pricingAssets: string[];
   protected usdStableAssets: string[];
   protected priceDecimals: number;
   protected maxHistoryRecords: number;
+  protected maxCachedDays: number;
 
   // internal states
   // mapping from ${baseToken}-${quoteToken} to price
@@ -59,6 +66,7 @@ export class TokenPricing {
   protected startBlockNumber: number;
   protected numRounds: number;
   protected historyUSDPrice: Record<string, HistoryPriceWithVolume[]>;
+  protected dailyPoolVolumeInUSD: Record<string, DailyPoolSnapshot[]>;
 
   constructor(
     protected tick: number = 2,
@@ -74,10 +82,12 @@ export class TokenPricing {
     this.usdPrice = {};
     this.tokenPrice = {};
     this.historyUSDPrice = {};
+    this.dailyPoolVolumeInUSD = {};
     this.priceDecimals = 8;
     this.numRounds = 0;
     this.startBlockNumber = 0;
     this.maxHistoryRecords = (2 * day) / 13 / this.tick;
+    this.maxCachedDays = 100;
 
     this.initPricingAsset();
   }
@@ -173,6 +183,16 @@ export class TokenPricing {
     };
   }
 
+  public getLatestVolumeInUSD(poolAddr: string, confirmation: number) {
+    const dailySnapshots =
+      this.dailyPoolVolumeInUSD[poolAddr.toLowerCase()] ?? [];
+    const isExist = dailySnapshots.length > confirmation;
+    if (!isExist) {
+      return { dayID: 0, volumeInUSD: Zero };
+    }
+    return dailySnapshots[dailySnapshots.length - 1 - confirmation];
+  }
+
   public getLatestPriceInUSD(baseToken: string) {
     const priceAggregationPerPairs: PriceAggregation[] = [];
     for (let i = 0; i < this.pricingAssets.length; ++i) {
@@ -226,6 +246,35 @@ export class TokenPricing {
       throw new Error(`unsupported token: ${tokenAddr}`);
     }
     return new BigNumber(10).pow(token.decimals);
+  }
+
+  protected updatePoolVolumeInUSD(
+    poolAddr: string,
+    volumeInUSD: BigNumber,
+    blockNumber: number
+  ) {
+    let dailySnapshots =
+      this.dailyPoolVolumeInUSD[poolAddr.toLowerCase()] ?? [];
+    const dayID = Math.floor(blockNumber / blocksPerDay);
+    const numDaysCached = dailySnapshots.length;
+    if (numDaysCached >= this.maxCachedDays) {
+      dailySnapshots = dailySnapshots.slice(-this.maxCachedDays);
+    }
+    if (
+      dailySnapshots.length &&
+      dailySnapshots[numDaysCached - 1].dayID === dayID
+    ) {
+      // the same day
+      dailySnapshots[numDaysCached - 1].volumeInUSD =
+        dailySnapshots[numDaysCached - 1].volumeInUSD.plus(volumeInUSD);
+    } else {
+      dailySnapshots.push({
+        volumeInUSD,
+        dayID: Math.floor(this.startBlockNumber / blocksPerDay),
+      });
+    }
+    // write back
+    this.dailyPoolVolumeInUSD[poolAddr.toLowerCase()] = dailySnapshots;
   }
 
   public volumeInUSD(
@@ -363,6 +412,7 @@ export class TokenPricing {
         }]. so discard the swap event!`
       );
     }
+    this.updatePoolVolumeInUSD(address, volumeInUSD, blockNumber);
 
     return volumeInUSD.dp(this.priceDecimals);
   }

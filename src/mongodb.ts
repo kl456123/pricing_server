@@ -1,4 +1,5 @@
 import { Collection, Db, Filter, MongoClient } from "mongodb";
+
 import { logger } from "./logging";
 
 export class Database {

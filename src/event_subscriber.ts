@@ -1,18 +1,23 @@
-import { ethers, Contract, BytesLike } from "ethers";
-import { Log } from "@ethersproject/abstract-provider";
 import { Interface } from "@ethersproject/abi";
+import { Log } from "@ethersproject/abstract-provider";
 import { BigNumber } from "bignumber.js";
-import { UniswapV2Pair__factory, UniswapV3Pool__factory } from "./typechain";
-import { Protocol, SwapEvent } from "./types";
+import { BytesLike, Contract, ethers } from "ethers";
+
+import { logger } from "./logging";
 import { TokenPricing } from "./pricing";
 import { tokensEthereum as tokens } from "./tokens";
-import { logger } from "./logging";
+import { UniswapV2Pair__factory, UniswapV3Pool__factory } from "./typechain";
+import { Protocol, SwapEvent } from "./types";
 
 const Zero = new BigNumber(0);
 
 type EventHandlerType = {
-  decodeLog: (log: Log) => Promise<SwapEvent>;
+  decodeLog: (log: Log, param: Param) => SwapEvent;
   protocol: Protocol;
+};
+
+type Param = {
+  tokens: string[];
 };
 
 export class EventSubscriber {
@@ -20,6 +25,8 @@ export class EventSubscriber {
   protected swapEvents: SwapEvent[];
   protected eventHandlersMap: Record<string, EventHandlerType>;
   protected addressSet: Set<string>;
+  protected addressToParams: Record<string, Param>;
+  protected fastSyncBatch: number;
 
   protected totalVolumeInUSD: BigNumber;
   protected decimals: number;
@@ -33,6 +40,8 @@ export class EventSubscriber {
     this.totalVolumeInUSD = Zero;
     this.eventHandlersMap = {};
     this.addressSet = new Set<string>();
+    this.addressToParams = {};
+    this.fastSyncBatch = 50;
     this.decimals = 8;
 
     this.initEventHandlersMap();
@@ -44,13 +53,9 @@ export class EventSubscriber {
     const uniswapV3Iface = UniswapV3Pool__factory.createInterface();
     this.eventHandlersMap[uniswapV2Iface.getEventTopic("Swap")] = {
       protocol: Protocol.UniswapV2,
-      decodeLog: async (log: Log) => {
-        const pairContract = UniswapV2Pair__factory.connect(
-          log.address,
-          this.provider
-        );
-        const token0 = await pairContract.token0();
-        const token1 = await pairContract.token1();
+      decodeLog: (log: Log, param: Param) => {
+        const token0 = param.tokens[0];
+        const token1 = param.tokens[1];
         const args = uniswapV2Iface.decodeEventLog(
           "Swap",
           log.data,
@@ -77,13 +82,9 @@ export class EventSubscriber {
     // uniswapv3
     this.eventHandlersMap[uniswapV3Iface.getEventTopic("Swap")] = {
       protocol: Protocol.UniswapV3,
-      decodeLog: async (log: Log) => {
-        const pairContract = UniswapV3Pool__factory.connect(
-          log.address,
-          this.provider
-        );
-        const token0 = await pairContract.token0();
-        const token1 = await pairContract.token1();
+      decodeLog: (log: Log, param: Param) => {
+        const token0 = param.tokens[0];
+        const token1 = param.tokens[1];
         const args = uniswapV3Iface.decodeEventLog(
           "Swap",
           log.data,
@@ -115,7 +116,7 @@ export class EventSubscriber {
     const balancerV2Iface = new ethers.utils.Interface(balancerV2ABI);
     this.eventHandlersMap[balancerV2Iface.getEventTopic("Swap")] = {
       protocol: Protocol.BalancerV2,
-      decodeLog: async (log: Log) => {
+      decodeLog: (log: Log) => {
         const args = balancerV2Iface.decodeEventLog(
           "Swap",
           log.data,
@@ -136,13 +137,14 @@ export class EventSubscriber {
       },
     };
 
+    // balancer
     const balancerABI = [
       "event LOG_SWAP(address indexed caller, address indexed tokenIn, address indexed tokenOut, uint256 tokenAmountIn, uint256 tokenAmountOut)",
     ];
     const balancerIface = new ethers.utils.Interface(balancerABI);
     this.eventHandlersMap[balancerIface.getEventTopic("LOG_SWAP")] = {
       protocol: Protocol.Balancer,
-      decodeLog: async (log: Log) => {
+      decodeLog: (log: Log) => {
         const args = balancerIface.decodeEventLog(
           "LOG_SWAP",
           log.data,
@@ -162,11 +164,77 @@ export class EventSubscriber {
         };
       },
     };
+
+    // curve
+    const curveABI = [
+      "event TokenExchangeUnderlying(address indexed buyer,int128 sold_id,uint256 tokens_sold,int128 bought_id,uint256 tokens_bought)",
+      "event TokenExchange(address indexed buyer,int128 sold_id,uint256 tokens_sold,int128 bought_id,uint256 tokens_bought)",
+    ];
+    const curveV2ABI = [
+      "event TokenExchange(address indexed buyer,uint256 sold_id,uint256 tokens_sold,uint256 bought_id,uint256 tokens_bought)",
+    ];
+    const curveIface = new ethers.utils.Interface(curveABI);
+    const curveV2Iface = new ethers.utils.Interface(curveV2ABI);
+
+    this.eventHandlersMap[curveIface.getEventTopic("TokenExchangeUnderlying")] =
+      {
+        protocol: Protocol.Curve,
+        decodeLog: (log: Log, param: Param) => {
+          const args = curveIface.decodeEventLog(
+            "TokenExchangeUnderlying",
+            log.data,
+            log.topics
+          );
+          const { sold_id, tokens_sold, bought_id, tokens_bought } = args;
+          const fromToken = param.tokens[sold_id];
+          const toToken = param.tokens[bought_id];
+          return {
+            fromToken,
+            toToken,
+            amountIn: tokens_sold.toString(),
+            amountOut: tokens_bought.toString(),
+            blockNumber: log.blockNumber,
+            address: log.address,
+            protocol: Protocol.Balancer,
+            logIndex: log.logIndex,
+            transactionIndex: log.transactionIndex,
+          };
+        },
+      };
+
+    // curveV2
+    this.eventHandlersMap[curveV2Iface.getEventTopic("TokenExchange")] = {
+      protocol: Protocol.CurveV2,
+      decodeLog: (log: Log, param: Param) => {
+        const args = curveV2Iface.decodeEventLog(
+          "TokenExchange",
+          log.data,
+          log.topics
+        );
+        const { sold_id, tokens_sold, bought_id, tokens_bought } = args;
+        const fromToken = param.tokens[sold_id];
+        const toToken = param.tokens[bought_id];
+        return {
+          fromToken,
+          toToken,
+          amountIn: tokens_sold.toString(),
+          amountOut: tokens_bought.toString(),
+          blockNumber: log.blockNumber,
+          address: log.address,
+          protocol: Protocol.Balancer,
+          logIndex: log.logIndex,
+          transactionIndex: log.transactionIndex,
+        };
+      },
+    };
   }
 
-  public registerPublisher(contractAddr: string) {
+  public registerPublisher(contractAddr: string, param?: Param) {
     if (!this.isRegisteredAlready(contractAddr)) {
       this.addressSet.add(contractAddr.toLowerCase());
+      if (param) {
+        this.addressToParams[contractAddr.toLowerCase()] = param;
+      }
       return true;
     }
     return false;
@@ -180,23 +248,26 @@ export class EventSubscriber {
     return this.totalVolumeInUSD.dp(this.decimals);
   }
   async getLogs(fromBlock: number, toBlock: number) {
-    const logs = await this.provider.getLogs({ fromBlock, toBlock });
-    const promises = logs.map(async (log) => {
+    const logs = await this.provider.getLogs({
+      fromBlock,
+      toBlock,
+    });
+    logs.forEach((log) => {
       if (
         log.topics[0] in this.eventHandlersMap &&
         this.addressSet.has(log.address.toLowerCase())
       ) {
         const eventHandler = this.eventHandlersMap[log.topics[0]];
-        const swapEvent = await eventHandler.decodeLog(log);
+        const param = this.addressToParams[log.address.toLowerCase()];
+        const swapEvent = eventHandler.decodeLog(log, param);
         this.swapEvents.push(swapEvent);
       }
     });
-    await Promise.all(promises);
   }
 
-  async syncLogs(fromBlock: number, toBlock: number) {
+  async processLogs(fromBlock: number, toBlock: number) {
     await this.getLogs(fromBlock, toBlock);
-    logger.info(`${this.swapEvents.length} num of events found`);
+    logger.info(`${this.swapEvents.length} num of events found to process`);
     const totalVolumeUSD = this.swapEvents
       .sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) {
@@ -244,12 +315,42 @@ export class EventSubscriber {
     this.swapEvents.length = 0;
     return totalVolumeUSD;
   }
+  async syncLogs() {
+    // fast-sync
+    const currentBlockNumber = await this.provider.getBlockNumber();
+    const toBlock = currentBlockNumber - this.confirmation;
+    const fromBlock = this.fromBlock;
 
-  start() {
+    // fetch logs by batch
+    for (let block = fromBlock; block <= toBlock; block += this.fastSyncBatch) {
+      const fromBlockPerBatch = block;
+      const toBlockPerBatch = Math.min(block + this.fastSyncBatch - 1, toBlock);
+      const totalVolumeInUSD = await this.processLogs(
+        fromBlockPerBatch,
+        toBlockPerBatch
+      );
+      this.totalVolumeInUSD = this.totalVolumeInUSD.plus(
+        totalVolumeInUSD.toString()
+      );
+
+      logger.info(
+        `processing logs in range [${fromBlockPerBatch}, ${toBlockPerBatch}]`
+      );
+    }
+    // fast-forward
+    this.fromBlock = toBlock + 1;
+  }
+
+  async start() {
+    await this.syncLogs();
+
     this.provider.on("block", async (blockTag) => {
       if (blockTag >= this.fromBlock + this.confirmation) {
         const toBlock = blockTag - this.confirmation;
-        const totalVolumeInUSD = await this.syncLogs(this.fromBlock, toBlock);
+        const totalVolumeInUSD = await this.processLogs(
+          this.fromBlock,
+          toBlock
+        );
         this.totalVolumeInUSD = this.totalVolumeInUSD.plus(
           totalVolumeInUSD.toString()
         );
