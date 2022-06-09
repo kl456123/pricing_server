@@ -315,9 +315,8 @@ export class EventSubscriber {
     this.swapEvents.length = 0;
     return totalVolumeUSD;
   }
-  async syncLogs() {
+  async syncLogs(currentBlockNumber: number) {
     // fast-sync
-    const currentBlockNumber = await this.provider.getBlockNumber();
     const toBlock = currentBlockNumber - this.confirmation;
     const fromBlock = this.fromBlock;
 
@@ -342,7 +341,13 @@ export class EventSubscriber {
   }
 
   async start() {
-    await this.syncLogs();
+    while (true) {
+      const currentBlockNumber = await this.provider.getBlockNumber();
+      await this.syncLogs(currentBlockNumber);
+      if (currentBlockNumber - this.fromBlock < this.confirmation) {
+        break;
+      }
+    }
 
     this.provider.on("block", async (blockTag) => {
       if (blockTag >= this.fromBlock + this.confirmation) {

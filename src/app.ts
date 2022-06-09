@@ -18,7 +18,7 @@ async function getApp() {
     url: process.env.MAINNET_URL,
     tokenCollectionName: "tokens",
     poolsCollectionName: "pools",
-    NumOfHistoricalDays: 2,
+    NumOfHistoricalDays: 0,
     dbConnection:
       process.env.DB_CONNECTION ||
       "mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1",
@@ -29,8 +29,7 @@ async function getApp() {
   };
 
   const provider = new ethers.providers.JsonRpcProvider(options.url);
-  // const currentBlockNumber = await provider.getBlockNumber();
-  const currentBlockNumber = 14919356;
+  const currentBlockNumber = await provider.getBlockNumber();
   const fromBlock =
     currentBlockNumber - blocksPerDay * options.NumOfHistoricalDays;
 
