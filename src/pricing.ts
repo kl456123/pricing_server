@@ -191,7 +191,7 @@ export class TokenPricing {
   }
 
   isPriceValid(price: TokenPriceWithSource) {
-    return price.blockNumber - this.startBlockNumber > 0;
+    return price.blockNumber - this.startBlockNumber >= 0;
   }
 
   public getLatestPriceInUSD(baseToken: string) {
@@ -199,19 +199,18 @@ export class TokenPricing {
     for (let i = 0; i < this.pricingAssets.length; ++i) {
       const key = this.getTokenPairKey(baseToken, this.pricingAssets[i]);
       // discard pricing asset when it has no usd price exist or token price is expired
-      if (key in this.tokenPrice && this.pricingAssets[i] in this.usdPrice) {
-        const validTokenPrices = this.tokenPrice[key].filter(
-          this.isPriceValid.bind(this)
+      if (
+        key in this.tokenPrice &&
+        this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
+        this.pricingAssets[i] in this.usdPrice
+      ) {
+        priceAggregationPerPairs.push(
+          this.processTokenPrice(
+            this.tokenPrice[key],
+            baseToken.toLowerCase(),
+            this.pricingAssets[i]
+          )
         );
-        if (validTokenPrices.length) {
-          priceAggregationPerPairs.push(
-            this.processTokenPrice(
-              validTokenPrices,
-              baseToken.toLowerCase(),
-              this.pricingAssets[i]
-            )
-          );
-        }
       }
     }
     if (!priceAggregationPerPairs.length) {
