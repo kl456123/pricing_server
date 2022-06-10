@@ -278,6 +278,11 @@ export class EventSubscriber {
         }
         return a.logIndex - b.logIndex;
       })
+      .filter(
+        ({ fromToken, toToken }) =>
+          this.tokenPricing.isSupportedToken(fromToken) &&
+          this.tokenPricing.isSupportedToken(toToken)
+      )
       .map(
         ({
           fromToken,

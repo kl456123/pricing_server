@@ -18,7 +18,7 @@ async function getApp() {
     url: process.env.MAINNET_URL,
     tokenCollectionName: "tokens",
     poolsCollectionName: "pools",
-    NumOfHistoricalDays: 0,
+    NumOfHistoricalDays: 2,
     dbConnection:
       process.env.DB_CONNECTION ||
       "mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1",

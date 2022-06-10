@@ -21,15 +21,12 @@ const One = new BigNumber(1);
 type PriceWithVolume = {
   price: BigNumber;
   volume: BigNumber; // the amounts of base token
+  blockNumber: number;
 };
 
 type DataSource = {
   protocol: Protocol;
   address: string;
-};
-
-export type HistoryPriceWithVolume = PriceWithVolume & {
-  blockNumber: number;
 };
 
 export type TokenPriceWithSource = PriceWithVolume & DataSource;
@@ -65,7 +62,7 @@ export class TokenPricing {
   private tokenPrice: Record<string, TokenPriceWithSource[]>;
   protected startBlockNumber: number;
   protected numRounds: number;
-  protected historyUSDPrice: Record<string, HistoryPriceWithVolume[]>;
+  protected historyUSDPrice: Record<string, PriceWithVolume[]>;
   protected dailyPoolVolumeInUSD: Record<string, DailyPoolSnapshot[]>;
 
   constructor(
@@ -92,7 +89,7 @@ export class TokenPricing {
     this.initPricingAsset();
   }
 
-  public getHistoryUSDPrice(token: string): HistoryPriceWithVolume[] {
+  public getHistoryUSDPrice(token: string): PriceWithVolume[] {
     if (token.toLowerCase() in this.historyUSDPrice) {
       return this.historyUSDPrice[token.toLowerCase()].map(
         (priceWithVolume) => ({
@@ -193,24 +190,34 @@ export class TokenPricing {
     return dailySnapshots[dailySnapshots.length - 1 - confirmation];
   }
 
+  isPriceValid(price: TokenPriceWithSource) {
+    return price.blockNumber - this.startBlockNumber > 0;
+  }
+
   public getLatestPriceInUSD(baseToken: string) {
     const priceAggregationPerPairs: PriceAggregation[] = [];
     for (let i = 0; i < this.pricingAssets.length; ++i) {
       const key = this.getTokenPairKey(baseToken, this.pricingAssets[i]);
-      // discard pricing asset when it has no usd price exist
+      // discard pricing asset when it has no usd price exist or token price is expired
       if (key in this.tokenPrice && this.pricingAssets[i] in this.usdPrice) {
-        priceAggregationPerPairs.push(
-          this.processTokenPrice(
-            this.tokenPrice[key],
-            baseToken.toLowerCase(),
-            this.pricingAssets[i]
-          )
+        const validTokenPrices = this.tokenPrice[key].filter(
+          this.isPriceValid.bind(this)
         );
+        if (validTokenPrices.length) {
+          priceAggregationPerPairs.push(
+            this.processTokenPrice(
+              validTokenPrices,
+              baseToken.toLowerCase(),
+              this.pricingAssets[i]
+            )
+          );
+        }
       }
     }
     if (!priceAggregationPerPairs.length) {
       return {
         round: this.numRounds,
+        blockNumber: this.startBlockNumber,
         price: Zero,
         volume: Zero,
         priceWithVolumePerPool: [],
@@ -234,17 +241,21 @@ export class TokenPricing {
 
     return {
       round: this.numRounds,
+      blockNumber: this.startBlockNumber,
       price: weightedPrice.dp(this.priceDecimals),
       volume: totalVolume.dp(this.priceDecimals),
       priceWithVolumePerPool,
     };
   }
+  public isSupportedToken(tokenAddr: string) {
+    return tokenAddr.toLowerCase() in this.tokens;
+  }
 
   public getDecimals(tokenAddr: string) {
     const token = this.tokens[tokenAddr.toLowerCase()];
-    if (!token) {
-      throw new Error(`unsupported token: ${tokenAddr}`);
-    }
+    // if (!token) {
+    // throw new Error(`unsupported token: ${tokenAddr}`);
+    // }
     return new BigNumber(10).pow(token.decimals);
   }
 
@@ -349,6 +360,7 @@ export class TokenPricing {
           volume: amountBought,
           address,
           protocol,
+          blockNumber,
         },
       ];
       this.tokenPrice[this.getTokenPairKey(fromTokenAddr, toTokenAddr)] = [
@@ -357,6 +369,7 @@ export class TokenPricing {
           volume: amountSold,
           address,
           protocol,
+          blockNumber,
         },
       ];
 
@@ -378,12 +391,14 @@ export class TokenPricing {
           volume: amountBought,
           address,
           protocol,
+          blockNumber,
         });
         this.tokenPrice[pairKey1].push({
           price: newFromTokenPrice,
           volume: amountSold,
           address,
           protocol,
+          blockNumber,
         });
       } else {
         this.tokenPrice[pairKey0] = [
@@ -392,6 +407,7 @@ export class TokenPricing {
             volume: amountBought,
             address,
             protocol,
+            blockNumber,
           },
         ];
         this.tokenPrice[pairKey1] = [
@@ -400,6 +416,7 @@ export class TokenPricing {
             volume: amountSold,
             address,
             protocol,
+            blockNumber,
           },
         ];
       }

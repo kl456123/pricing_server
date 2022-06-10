@@ -1,3 +1,5 @@
+import fs from "fs";
+
 import axios from "axios";
 import dotenv from "dotenv";
 
@@ -10,14 +12,18 @@ dotenv.config();
 const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 
 async function requestLatestPrice(query: { address: string }) {
-  requestGet(query, "/latestPrice");
+  return requestGet(query, "/latestPrice");
+}
+
+async function requestHistoryUSDPrice(query: { address: string }) {
+  return requestGet(query, "/historyUSDPrice");
 }
 
 async function requestLatestVolumeInUSD(query: {
   address: string;
   confirmation?: number;
 }) {
-  requestGet(query, "/latestVolumeInUSD");
+  return requestGet(query, "/latestVolumeInUSD");
 }
 
 async function requestGet(
@@ -26,7 +32,7 @@ async function requestGet(
 ) {
   const res = await axios.get(`${url}${routePath}`, { params: query });
   const quoteRes = res.data;
-  logger.info(quoteRes);
+  return quoteRes;
 }
 
 async function requestRegisterListener(query: {
@@ -44,7 +50,25 @@ async function requestRegisterListener(query: {
 
 async function main() {
   // query token price
-  await requestLatestPrice({ address: tokensEthereum.WETH.address });
+  // await requestLatestPrice({ address: tokensEthereum.WETH.address });
+  const { historyPrices } = await requestHistoryUSDPrice({
+    address: tokensEthereum.WETH.address,
+  });
+  fs.writeFileSync(
+    "./price.json",
+    JSON.stringify(
+      historyPrices
+        .slice(1)
+        .map(
+          (item: { price: string; volume: string; blockNumber: string }) => ({
+            ...item,
+            price: item.price,
+          })
+        ),
+      null,
+      4
+    )
+  );
   await requestLatestPrice({ address: tokensEthereum.WBTC.address });
   await requestLatestPrice({
     address: "0x8B3192f5eEBD8579568A2Ed41E6FEB402f93f73F",
@@ -60,8 +84,13 @@ async function main() {
   await requestLatestVolumeInUSD({
     address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
   });
-  requestLatestVolumeInUSD({
+
+  await requestLatestVolumeInUSD({
     address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
+  });
+  await requestLatestVolumeInUSD({
+    address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
+    confirmation: 1,
   });
 }
 
