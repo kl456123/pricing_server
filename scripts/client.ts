@@ -9,8 +9,8 @@ import { tokensEthereum } from "../src/tokens";
 import { Protocol } from "../src/types";
 
 dotenv.config();
-// const url = `http://35.75.165.133:8547`;
-const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+const url = `http://35.75.165.133:8547`;
+// const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 
 async function requestLatestPrice(query: { address: string }) {
   return requestGet(query, "/latestPrice");
@@ -61,12 +61,10 @@ function getTimeStamp(
   return startTimeStamp + (blockNumber - startBlockNumber) * interval;
 }
 
-async function main() {
-  // query token price
-  // await requestLatestPrice({ address: tokensEthereum.WETH.address });
+async function saveHistoryPrices(address: string) {
   const { historyPrices: historyPricesWithFirst } =
     (await requestHistoryUSDPrice({
-      address: tokensEthereum.WETH.address,
+      address,
     })) as { historyPrices: HistoryPrice[] };
   const historyPrices = historyPricesWithFirst.slice(1);
 
@@ -105,6 +103,15 @@ async function main() {
       4
     )
   );
+}
+
+async function main() {
+  // query token price
+  const wethPriceInUSD = await requestLatestPrice({
+    address: "0x853d955acef822db058eb8505911ed77f175b99e",
+  });
+  logger.info(wethPriceInUSD);
+  // await saveHistoryPrices(tokensEthereum.WETH.address);
   // await requestLatestPrice({ address: tokensEthereum.WBTC.address });
   // await requestLatestPrice({
   // address: "0x8B3192f5eEBD8579568A2Ed41E6FEB402f93f73F",
@@ -124,10 +131,11 @@ async function main() {
   // await requestLatestVolumeInUSD({
   // address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
   // });
-  // await requestLatestVolumeInUSD({
-  // address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
-  // confirmation: 1,
-  // });
+  const volumeInUSD = await requestLatestVolumeInUSD({
+    address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
+    confirmation: 1,
+  });
+  logger.info(volumeInUSD);
 }
 
 main();

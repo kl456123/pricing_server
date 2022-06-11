@@ -35,14 +35,10 @@ export function getAllRouters(
 
   router.get("/latestPrice", (ctx) => {
     const address = ctx.query.address as string;
-    const { round, price, volume, priceWithVolumePerPool } =
-      tokenPricing.getLatestPriceInUSD(address);
+    const res = tokenPricing.getLatestPriceInUSD(address);
     ctx.body = {
+      ...res,
       token: address,
-      price,
-      volume,
-      round,
-      priceWithVolumePerPool,
     };
   });
 

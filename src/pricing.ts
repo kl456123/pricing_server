@@ -280,7 +280,7 @@ export class TokenPricing {
     } else {
       dailySnapshots.push({
         volumeInUSD,
-        dayID: Math.floor(this.startBlockNumber / blocksPerDay),
+        dayID,
       });
     }
     // write back
