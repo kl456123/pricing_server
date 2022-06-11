@@ -64,6 +64,8 @@ export class TokenPricing {
   protected numRounds: number;
   protected historyUSDPrice: Record<string, PriceWithVolume[]>;
   protected dailyPoolVolumeInUSD: Record<string, DailyPoolSnapshot[]>;
+  protected currentRoundUpdatedTokens: Set<string>;
+  protected currentRoundUpdatedTokenPairs: Set<string>;
 
   constructor(
     protected tick: number = 2,
@@ -81,6 +83,8 @@ export class TokenPricing {
     this.historyUSDPrice = {};
     this.dailyPoolVolumeInUSD = {};
     this.priceDecimals = 8;
+    this.currentRoundUpdatedTokens = new Set<string>();
+    this.currentRoundUpdatedTokenPairs = new Set<string>();
     this.numRounds = 0;
     this.startBlockNumber = 0;
     this.maxHistoryRecords = (2 * day) / 13 / this.tick;
@@ -123,7 +127,8 @@ export class TokenPricing {
     baseToken: string,
     quoteToken: string
   ): PriceAggregation {
-    const quoteTokenPriceInUSD = this.usdPrice[quoteToken] ?? Zero;
+    const quoteTokenPriceInUSD =
+      this.usdPrice[quoteToken.toLowerCase()] ?? Zero;
     const priceWithVolumePerPool = _(tokenPrices)
       .map((item) => item.address)
       .uniq()
@@ -196,20 +201,15 @@ export class TokenPricing {
 
   public getLatestPriceInUSD(baseToken: string) {
     const priceAggregationPerPairs: PriceAggregation[] = [];
-    let realTotalVolume = Zero;
     for (let i = 0; i < this.pricingAssets.length; ++i) {
       const key = this.getTokenPairKey(baseToken, this.pricingAssets[i]);
       // discard pricing asset when it has no usd price exist or token price is expired
       if (
         key in this.tokenPrice &&
-        // this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
+        this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
         this.pricingAssets[i] in this.usdPrice &&
         this.usdPrice[this.pricingAssets[i]].gt(0)
       ) {
-        // real total volume
-        realTotalVolume = this.tokenPrice[key]
-          .filter((item) => item.blockNumber >= this.startBlockNumber)
-          .reduce((res, cur) => res.plus(cur.volume), realTotalVolume);
         priceAggregationPerPairs.push(
           this.processTokenPrice(
             this.tokenPrice[key],
@@ -246,7 +246,7 @@ export class TokenPricing {
       round: this.numRounds,
       blockNumber: this.startBlockNumber,
       price: weightedPrice.dp(this.priceDecimals),
-      volume: realTotalVolume.dp(this.priceDecimals),
+      volume: totalVolume.dp(this.priceDecimals),
       priceWithVolumePerPool,
     };
   }
@@ -286,6 +286,39 @@ export class TokenPricing {
     }
     // write back
     this.dailyPoolVolumeInUSD[poolAddr.toLowerCase()] = dailySnapshots;
+  }
+
+  updateTokensPrice() {
+    for (const fromTokenAddr of this.currentRoundUpdatedTokens) {
+      // cache all history token price for current round
+      const { price: fromTokenPrice, volume: fromTokenVolume } =
+        this.getLatestPriceInUSD(fromTokenAddr);
+      let fromTokenHistory = this.historyUSDPrice[fromTokenAddr] ?? [];
+
+      // discard oldest history records
+      if (fromTokenHistory.length >= this.maxHistoryRecords) {
+        fromTokenHistory = fromTokenHistory.slice(-this.maxHistoryRecords);
+      }
+
+      fromTokenHistory.push({
+        price: fromTokenPrice,
+        volume: fromTokenVolume,
+        blockNumber: this.startBlockNumber,
+      });
+      this.historyUSDPrice[fromTokenAddr] = fromTokenHistory;
+      // update usd price
+
+      if (fromTokenPrice.gt(0)) {
+        this.usdPrice[fromTokenAddr] = fromTokenPrice;
+      }
+    }
+
+    // remove all out of dated swap events
+    this.currentRoundUpdatedTokenPairs.forEach(
+      (pairKey) => delete this.tokenPrice[pairKey]
+    );
+
+    this.currentRoundUpdatedTokens.clear();
   }
 
   public volumeInUSD(
@@ -330,102 +363,7 @@ export class TokenPricing {
     const newToTokenPrice = amountSold.div(amountBought);
     const newFromTokenPrice = amountBought.div(amountSold);
 
-    if (blockNumber >= this.startBlockNumber + this.tick) {
-      // cache history token price
-      let fromTokenHistory = this.historyUSDPrice[fromTokenAddr] ?? [];
-      let toTokenHistory = this.historyUSDPrice[toTokenAddr] ?? [];
-
-      // discard oldest history records
-      if (fromTokenHistory.length >= this.maxHistoryRecords) {
-        fromTokenHistory = fromTokenHistory.slice(-this.maxHistoryRecords);
-        toTokenHistory = toTokenHistory.slice(-this.maxHistoryRecords);
-      }
-
-      fromTokenHistory.push({
-        price: fromTokenPrice,
-        volume: fromTokenVolume,
-        blockNumber: this.startBlockNumber,
-      });
-      toTokenHistory.push({
-        price: toTokenPrice,
-        volume: toTokenVolume,
-        blockNumber: this.startBlockNumber,
-      });
-      this.historyUSDPrice[fromTokenAddr] = fromTokenHistory;
-      this.historyUSDPrice[toTokenAddr] = toTokenHistory;
-      // update usd price
-
-      this.usdPrice[fromTokenAddr] = fromTokenPrice;
-      this.usdPrice[toTokenAddr] = toTokenPrice;
-
-      // start next round
-      this.tokenPrice[this.getTokenPairKey(toTokenAddr, fromTokenAddr)] = [
-        {
-          price: newToTokenPrice,
-          volume: amountBought,
-          address,
-          protocol,
-          blockNumber,
-        },
-      ];
-      this.tokenPrice[this.getTokenPairKey(fromTokenAddr, toTokenAddr)] = [
-        {
-          price: newFromTokenPrice,
-          volume: amountSold,
-          address,
-          protocol,
-          blockNumber,
-        },
-      ];
-
-      // update block number
-      const num = Math.floor((blockNumber - this.startBlockNumber) / this.tick);
-      // fast-forward
-      this.startBlockNumber += this.tick * num;
-      this.numRounds += 1;
-    } else if (
-      blockNumber < this.startBlockNumber + this.tick &&
-      blockNumber >= this.startBlockNumber
-    ) {
-      /// push price to the current round
-      const pairKey0 = this.getTokenPairKey(toTokenAddr, fromTokenAddr);
-      const pairKey1 = this.getTokenPairKey(fromTokenAddr, toTokenAddr);
-      if (pairKey0 in this.tokenPrice) {
-        this.tokenPrice[pairKey0].push({
-          price: newToTokenPrice,
-          volume: amountBought,
-          address,
-          protocol,
-          blockNumber,
-        });
-        this.tokenPrice[pairKey1].push({
-          price: newFromTokenPrice,
-          volume: amountSold,
-          address,
-          protocol,
-          blockNumber,
-        });
-      } else {
-        this.tokenPrice[pairKey0] = [
-          {
-            price: newToTokenPrice,
-            volume: amountBought,
-            address,
-            protocol,
-            blockNumber,
-          },
-        ];
-        this.tokenPrice[pairKey1] = [
-          {
-            price: newFromTokenPrice,
-            volume: amountSold,
-            address,
-            protocol,
-            blockNumber,
-          },
-        ];
-      }
-    } else {
+    if (blockNumber < this.startBlockNumber) {
       logger.warn(
         `blockNumber: ${blockNumber} is out of date, current round is in [${
           this.startBlockNumber
@@ -433,8 +371,62 @@ export class TokenPricing {
           this.startBlockNumber + this.tick - 1
         }]. so discard the swap event!`
       );
+      return volumeInUSD.dp(this.priceDecimals);
+    }
+
+    if (blockNumber >= this.startBlockNumber + this.tick) {
+      this.updateTokensPrice();
+
+      // update block number
+      const num = Math.floor((blockNumber - this.startBlockNumber) / this.tick);
+      // fast-forward
+      this.startBlockNumber += this.tick * num;
+      this.numRounds += 1;
+    }
+
+    // push price to the current round
+    const pairKey0 = this.getTokenPairKey(toTokenAddr, fromTokenAddr);
+    const pairKey1 = this.getTokenPairKey(fromTokenAddr, toTokenAddr);
+    if (pairKey0 in this.tokenPrice) {
+      this.tokenPrice[pairKey0].push({
+        price: newToTokenPrice,
+        volume: amountBought,
+        address,
+        protocol,
+        blockNumber,
+      });
+      this.tokenPrice[pairKey1].push({
+        price: newFromTokenPrice,
+        volume: amountSold,
+        address,
+        protocol,
+        blockNumber,
+      });
+    } else {
+      this.tokenPrice[pairKey0] = [
+        {
+          price: newToTokenPrice,
+          volume: amountBought,
+          address,
+          protocol,
+          blockNumber,
+        },
+      ];
+      this.tokenPrice[pairKey1] = [
+        {
+          price: newFromTokenPrice,
+          volume: amountSold,
+          address,
+          protocol,
+          blockNumber,
+        },
+      ];
     }
     this.updatePoolVolumeInUSD(address, volumeInUSD, blockNumber);
+    this.currentRoundUpdatedTokens.add(fromTokenAddr);
+    this.currentRoundUpdatedTokens.add(toTokenAddr);
+    this.currentRoundUpdatedTokenPairs.add(pairKey0);
+    this.currentRoundUpdatedTokenPairs.add(pairKey1);
 
     return volumeInUSD.dp(this.priceDecimals);
   }
