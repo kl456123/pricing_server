@@ -203,7 +203,8 @@ export class TokenPricing {
       if (
         key in this.tokenPrice &&
         // this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
-        this.pricingAssets[i] in this.usdPrice
+        this.pricingAssets[i] in this.usdPrice &&
+        this.usdPrice[this.pricingAssets[i]].gt(0)
       ) {
         // real total volume
         realTotalVolume = this.tokenPrice[key]
