@@ -1,3 +1,5 @@
 .env
 src/typechain/
 node_modules/
+yarn-error.log
+price.json

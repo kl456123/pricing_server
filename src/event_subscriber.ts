@@ -1,5 +1,6 @@
 import { Interface } from "@ethersproject/abi";
 import { Log } from "@ethersproject/abstract-provider";
+import retry from "async-retry";
 import { BigNumber } from "bignumber.js";
 import { BytesLike, Contract, ethers } from "ethers";
 
@@ -30,6 +31,7 @@ export class EventSubscriber {
 
   protected totalVolumeInUSD: BigNumber;
   protected decimals: number;
+  protected retries: number;
   constructor(
     protected tokenPricing: TokenPricing,
     protected provider: ethers.providers.JsonRpcProvider,
@@ -43,6 +45,7 @@ export class EventSubscriber {
     this.addressToParams = {};
     this.fastSyncBatch = 50;
     this.decimals = 8;
+    this.retries = 2;
 
     this.initEventHandlersMap();
   }
@@ -248,10 +251,23 @@ export class EventSubscriber {
     return this.totalVolumeInUSD.dp(this.decimals);
   }
   async getLogs(fromBlock: number, toBlock: number) {
-    const logs = await this.provider.getLogs({
-      fromBlock,
-      toBlock,
-    });
+    let logs: Log[] = [];
+    await retry(
+      async () => {
+        logs = await this.provider.getLogs({
+          fromBlock,
+          toBlock,
+        });
+      },
+      {
+        retries: this.retries,
+        onRetry: (error, retry) => {
+          logger.error(
+            `Failed to getLogs from provider, retry attempt: ${retry}`
+          );
+        },
+      }
+    );
     logs.forEach((log) => {
       if (
         log.topics[0] in this.eventHandlersMap &&

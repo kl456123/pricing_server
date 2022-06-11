@@ -196,14 +196,19 @@ export class TokenPricing {
 
   public getLatestPriceInUSD(baseToken: string) {
     const priceAggregationPerPairs: PriceAggregation[] = [];
+    let realTotalVolume = Zero;
     for (let i = 0; i < this.pricingAssets.length; ++i) {
       const key = this.getTokenPairKey(baseToken, this.pricingAssets[i]);
       // discard pricing asset when it has no usd price exist or token price is expired
       if (
         key in this.tokenPrice &&
-        this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
+        // this.tokenPrice[key][0].blockNumber >= this.startBlockNumber &&
         this.pricingAssets[i] in this.usdPrice
       ) {
+        // real total volume
+        realTotalVolume = this.tokenPrice[key]
+          .filter((item) => item.blockNumber >= this.startBlockNumber)
+          .reduce((res, cur) => res.plus(cur.volume), realTotalVolume);
         priceAggregationPerPairs.push(
           this.processTokenPrice(
             this.tokenPrice[key],
@@ -236,13 +241,11 @@ export class TokenPricing {
         priceAggregationPerPair.priceWithVolumePerPool
     );
 
-    this.usdPrice[baseToken.toLowerCase()] = weightedPrice;
-
     return {
       round: this.numRounds,
       blockNumber: this.startBlockNumber,
       price: weightedPrice.dp(this.priceDecimals),
-      volume: totalVolume.dp(this.priceDecimals),
+      volume: realTotalVolume.dp(this.priceDecimals),
       priceWithVolumePerPool,
     };
   }
@@ -252,9 +255,6 @@ export class TokenPricing {
 
   public getDecimals(tokenAddr: string) {
     const token = this.tokens[tokenAddr.toLowerCase()];
-    // if (!token) {
-    // throw new Error(`unsupported token: ${tokenAddr}`);
-    // }
     return new BigNumber(10).pow(token.decimals);
   }
 
@@ -352,6 +352,11 @@ export class TokenPricing {
       });
       this.historyUSDPrice[fromTokenAddr] = fromTokenHistory;
       this.historyUSDPrice[toTokenAddr] = toTokenHistory;
+      // update usd price
+
+      this.usdPrice[fromTokenAddr] = fromTokenPrice;
+      this.usdPrice[toTokenAddr] = toTokenPrice;
+
       // start next round
       this.tokenPrice[this.getTokenPairKey(toTokenAddr, fromTokenAddr)] = [
         {
