@@ -8,6 +8,7 @@ export enum Protocol {
   Bancor,
   Kyber,
   DODO,
+  DODOV2,
 }
 
 export type Token = {

@@ -7,7 +7,11 @@ import { BytesLike, Contract, ethers } from "ethers";
 import { logger } from "./logging";
 import { TokenPricing } from "./pricing";
 import { tokensEthereum as tokens } from "./tokens";
-import { UniswapV2Pair__factory, UniswapV3Pool__factory } from "./typechain";
+import {
+  DODO__factory,
+  UniswapV2Pair__factory,
+  UniswapV3Pool__factory,
+} from "./typechain";
 import { Protocol, SwapEvent } from "./types";
 
 const Zero = new BigNumber(0);
@@ -17,7 +21,16 @@ type EventHandlerType = {
   protocol: Protocol;
 };
 
-type Param = {
+type Param =
+  | CurveParam
+  | {
+      tokens: string[];
+    };
+
+type CurveParam = {
+  isMeta: boolean;
+  isLending?: boolean;
+  wrappedToken?: string[];
   tokens: string[];
 };
 
@@ -43,7 +56,7 @@ export class EventSubscriber {
     this.eventHandlersMap = {};
     this.addressSet = new Set<string>();
     this.addressToParams = {};
-    this.fastSyncBatch = 50;
+    this.fastSyncBatch = 40;
     this.decimals = 8;
     this.retries = 2;
 
@@ -205,6 +218,38 @@ export class EventSubscriber {
         },
       };
 
+    this.eventHandlersMap[curveIface.getEventTopic("TokenExchange")] = {
+      protocol: Protocol.Curve,
+      decodeLog: (log: Log, param: Param) => {
+        const curveParam = param as CurveParam;
+        const args = curveIface.decodeEventLog(
+          "TokenExchange",
+          log.data,
+          log.topics
+        );
+        const { sold_id, tokens_sold, bought_id, tokens_bought } = args;
+        let tokens: string[];
+        if (curveParam.isLending) {
+          tokens = curveParam.wrappedToken!;
+        } else {
+          tokens = param.tokens;
+        }
+        const fromToken = tokens[sold_id];
+        const toToken = tokens[bought_id];
+        return {
+          fromToken,
+          toToken,
+          amountIn: tokens_sold.toString(),
+          amountOut: tokens_bought.toString(),
+          blockNumber: log.blockNumber,
+          address: log.address,
+          protocol: Protocol.Balancer,
+          logIndex: log.logIndex,
+          transactionIndex: log.transactionIndex,
+        };
+      },
+    };
+
     // curveV2
     this.eventHandlersMap[curveV2Iface.getEventTopic("TokenExchange")] = {
       protocol: Protocol.CurveV2,
@@ -225,6 +270,86 @@ export class EventSubscriber {
           blockNumber: log.blockNumber,
           address: log.address,
           protocol: Protocol.Balancer,
+          logIndex: log.logIndex,
+          transactionIndex: log.transactionIndex,
+        };
+      },
+    };
+
+    // dodov1
+    const dodoIface = DODO__factory.createInterface();
+    this.eventHandlersMap[dodoIface.getEventTopic("BuyBaseToken")] = {
+      protocol: Protocol.DODO,
+      decodeLog: (log: Log, param: Param) => {
+        const args = dodoIface.decodeEventLog(
+          "BuyBaseToken",
+          log.data,
+          log.topics
+        );
+        const { receiveBase, payQuote } = args;
+        const baseToken = param.tokens[0];
+        const quoteToken = param.tokens[1];
+        return {
+          fromToken: quoteToken,
+          toToken: baseToken,
+          amountIn: payQuote.toString(),
+          amountOut: receiveBase.toString(),
+          blockNumber: log.blockNumber,
+          address: log.address,
+          protocol: Protocol.DODO,
+          logIndex: log.logIndex,
+          transactionIndex: log.transactionIndex,
+        };
+      },
+    };
+
+    this.eventHandlersMap[dodoIface.getEventTopic("SellBaseToken")] = {
+      protocol: Protocol.DODO,
+      decodeLog: (log: Log, param: Param) => {
+        const args = dodoIface.decodeEventLog(
+          "SellBaseToken",
+          log.data,
+          log.topics
+        );
+        const baseToken = param.tokens[0];
+        const quoteToken = param.tokens[1];
+        const { receiveQuote, payBase } = args;
+        return {
+          fromToken: baseToken,
+          toToken: quoteToken,
+          amountIn: payBase.toString(),
+          amountOut: receiveQuote.toString(),
+          blockNumber: log.blockNumber,
+          address: log.address,
+          protocol: Protocol.DODO,
+          logIndex: log.logIndex,
+          transactionIndex: log.transactionIndex,
+        };
+      },
+    };
+
+    // dodov2
+    const dodoV2ABI = [
+      "event DODOSwap(address fromToken,address toToken,uint256 fromAmount,uint256 toAmount,address trader,address receiver)",
+    ];
+    const dodoV2Iface = new ethers.utils.Interface(dodoV2ABI);
+    this.eventHandlersMap[dodoV2Iface.getEventTopic("DODOSwap")] = {
+      protocol: Protocol.DODOV2,
+      decodeLog: (log: Log, param: Param) => {
+        const args = dodoV2Iface.decodeEventLog(
+          "DODOSwap",
+          log.data,
+          log.topics
+        );
+        const { fromToken, toToken, fromAmount, toAmount } = args;
+        return {
+          fromToken,
+          toToken,
+          amountIn: fromAmount.toString(),
+          amountOut: toAmount.toString(),
+          blockNumber: log.blockNumber,
+          address: log.address,
+          protocol: Protocol.DODO,
           logIndex: log.logIndex,
           transactionIndex: log.transactionIndex,
         };
@@ -372,16 +497,7 @@ export class EventSubscriber {
 
     this.provider.on("block", async (blockTag) => {
       if (blockTag >= this.fromBlock + this.confirmation) {
-        const toBlock = blockTag - this.confirmation;
-        const totalVolumeInUSD = await this.processLogs(
-          this.fromBlock,
-          toBlock
-        );
-        this.totalVolumeInUSD = this.totalVolumeInUSD.plus(
-          totalVolumeInUSD.toString()
-        );
-        // fast-forward
-        this.fromBlock = toBlock + 1;
+        await this.syncLogs(blockTag);
       }
     });
   }

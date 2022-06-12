@@ -9,8 +9,8 @@ import { tokensEthereum } from "../src/tokens";
 import { Protocol } from "../src/types";
 
 dotenv.config();
-const url = `http://35.75.165.133:8547`;
-// const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+// const url = `http://35.75.165.133:8547`;
+const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 
 async function requestLatestPrice(query: { address: string }) {
   return requestGet(query, "/latestPrice");
@@ -67,6 +67,10 @@ async function saveHistoryPrices(address: string) {
       address,
     })) as { historyPrices: HistoryPrice[] };
   const historyPrices = historyPricesWithFirst.slice(1);
+  if (historyPrices && !historyPrices.length) {
+    logger.info(`no history price of token: ${address}`);
+    return;
+  }
 
   const provider = new ethers.providers.JsonRpcProvider(
     `http://35.75.165.133:8545`
@@ -108,32 +112,32 @@ async function saveHistoryPrices(address: string) {
 async function main() {
   // query token price
   const wethPriceInUSD = await requestLatestPrice({
-    address: "0x853d955acef822db058eb8505911ed77f175b99e",
+    address: tokensEthereum.WETH.address,
   });
   logger.info(wethPriceInUSD);
-  // await saveHistoryPrices(tokensEthereum.WETH.address);
-  // await requestLatestPrice({ address: tokensEthereum.WBTC.address });
-  // await requestLatestPrice({
-  // address: "0x8B3192f5eEBD8579568A2Ed41E6FEB402f93f73F",
-  // }); // SAITAMA
-  // await requestLatestPrice({
-  // address: "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
-  // }); // SHIB
-  // await requestLatestPrice({
-  // address: "0x956F47F50A910163D8BF957Cf5846D573E7f87CA",
-  // }); // UNI
+  await saveHistoryPrices("0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84");
+  await requestLatestPrice({ address: tokensEthereum.WBTC.address });
+  await requestLatestPrice({
+    address: "0x8B3192f5eEBD8579568A2Ed41E6FEB402f93f73F",
+  }); // SAITAMA
+  await requestLatestPrice({
+    address: "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
+  }); // SHIB
+  await requestLatestPrice({
+    address: "0x956F47F50A910163D8BF957Cf5846D573E7f87CA",
+  }); // UNI
 
-  // // WETH/USDC
-  // await requestLatestVolumeInUSD({
-  // address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
-  // });
-
-  // await requestLatestVolumeInUSD({
-  // address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
-  // });
-  const volumeInUSD = await requestLatestVolumeInUSD({
+  // WETH/USDC
+  await requestLatestVolumeInUSD({
     address: "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640",
-    confirmation: 1,
+  });
+
+  await requestLatestVolumeInUSD({
+    address: "0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",
+  });
+  const volumeInUSD = await requestLatestVolumeInUSD({
+    address: "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022",
+    confirmation: 0,
   });
   logger.info(volumeInUSD);
 }

@@ -2,7 +2,7 @@ import { BigNumber } from "bignumber.js";
 import { ethers } from "ethers";
 import _ from "lodash";
 
-import { blocksPerDay, day } from "./constants";
+import { blocksPerDay, day, ethAddr } from "./constants";
 import { logger } from "./logging";
 import {
   pricingTokens,
@@ -223,7 +223,8 @@ export class TokenPricing {
       return {
         round: this.numRounds,
         blockNumber: this.startBlockNumber,
-        price: Zero,
+        // use the last price record
+        price: this.usdPrice[baseToken.toLowerCase()] ?? Zero,
         volume: Zero,
         priceWithVolumePerPool: [],
       };
@@ -321,6 +322,15 @@ export class TokenPricing {
     this.currentRoundUpdatedTokens.clear();
   }
 
+  tokenAddrPreprocess(tokenAddr: string) {
+    tokenAddr = tokenAddr.toLowerCase();
+    if (tokenAddr === ethAddr.toLowerCase()) {
+      // wrapped to weth for now
+      return tokens.WETH.address.toLowerCase();
+    }
+    return tokenAddr;
+  }
+
   public volumeInUSD(
     fromToken: string,
     fromTokenAmount: string,
@@ -331,8 +341,8 @@ export class TokenPricing {
     protocol: Protocol
   ) {
     // to lowercase
-    const fromTokenAddr = fromToken.toLowerCase();
-    const toTokenAddr = toToken.toLowerCase();
+    const fromTokenAddr = this.tokenAddrPreprocess(fromToken);
+    const toTokenAddr = this.tokenAddrPreprocess(toToken);
 
     const { price: fromTokenPrice, volume: fromTokenVolume } =
       this.getLatestPriceInUSD(fromTokenAddr);

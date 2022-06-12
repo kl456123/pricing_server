@@ -18,7 +18,8 @@ if __name__=='__main__':
     plt.title('price of WETH/USDC in 24h')
     ax = plt.gca()
     ax.xaxis.set_major_formatter(xfmt)
-    xlocator = mdates.HourLocator(interval=4)
+    xlocator = mdates.HourLocator(interval=1)
+    plt.xticks(rotation=45)
     # xlocator = mdates.MinuteLocator(interval=15)
 
     # Set xtick labels to appear every 15 minutes
