@@ -301,15 +301,15 @@ export class TokenPricing {
         fromTokenHistory = fromTokenHistory.slice(-this.maxHistoryRecords);
       }
 
-      fromTokenHistory.push({
-        price: fromTokenPrice,
-        volume: fromTokenVolume,
-        blockNumber: this.startBlockNumber,
-      });
-      this.historyUSDPrice[fromTokenAddr] = fromTokenHistory;
-      // update usd price
+      if (fromTokenPrice.gt(0) && fromTokenVolume.gt(0)) {
+        fromTokenHistory.push({
+          price: fromTokenPrice,
+          volume: fromTokenVolume,
+          blockNumber: this.startBlockNumber,
+        });
+        this.historyUSDPrice[fromTokenAddr] = fromTokenHistory;
+        // update usd price
 
-      if (fromTokenPrice.gt(0)) {
         this.usdPrice[fromTokenAddr] = fromTokenPrice;
       }
     }

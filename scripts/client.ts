@@ -9,8 +9,8 @@ import { tokensEthereum } from "../src/tokens";
 import { Protocol } from "../src/types";
 
 dotenv.config();
-// const url = `http://35.75.165.133:8547`;
-const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+const url = `http://35.75.165.133:8547`;
+// const url = `http://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
 
 async function requestLatestPrice(query: { address: string }) {
   return requestGet(query, "/latestPrice");
@@ -61,15 +61,17 @@ function getTimeStamp(
   return startTimeStamp + (blockNumber - startBlockNumber) * interval;
 }
 
-async function saveHistoryPrices(address: string) {
+async function fetchHistoryPrices(address: string, save: boolean = false) {
   const { historyPrices: historyPricesWithFirst } =
     (await requestHistoryUSDPrice({
       address,
     })) as { historyPrices: HistoryPrice[] };
-  const historyPrices = historyPricesWithFirst.slice(1);
+  const historyPrices = historyPricesWithFirst.filter(
+    (item) => parseInt(item.price) > 0
+  );
   if (historyPrices && !historyPrices.length) {
     logger.info(`no history price of token: ${address}`);
-    return;
+    return [];
   }
 
   const provider = new ethers.providers.JsonRpcProvider(
@@ -96,17 +98,76 @@ async function saveHistoryPrices(address: string) {
       ),
     }));
 
-  fs.writeFileSync(
-    "./price.json",
-    JSON.stringify(
-      historyPricesWithTimeStamp.map((item: HistoryPriceWithTiemStamp) => ({
-        ...item,
-        price: item.price,
-      })),
-      null,
-      4
-    )
+  if (save) {
+    fs.writeFileSync(
+      `./${address}-usd.json`,
+      JSON.stringify(historyPricesWithTimeStamp, null, 4)
+    );
+  }
+  return historyPricesWithTimeStamp;
+}
+
+async function fetchHistoryPairPrices(
+  baseToken: string,
+  quoteToken: string,
+  save: boolean = false
+) {
+  const baseTokenHistoryPrices = await fetchHistoryPrices(baseToken);
+  const quoteTokenHistoryPrices = await fetchHistoryPrices(quoteToken);
+  const pairPrices = [];
+  let i = 0,
+    j = 0;
+  while (
+    i < baseTokenHistoryPrices.length &&
+    j < quoteTokenHistoryPrices.length
+  ) {
+    const baseBn = parseInt(baseTokenHistoryPrices[i].blockNumber);
+    const quoteBn = parseInt(quoteTokenHistoryPrices[j].blockNumber);
+    const bn = Math.min(baseBn, quoteBn);
+    pairPrices.push({
+      timeStamp: baseTokenHistoryPrices[i].timeStamp,
+      blockNumber: bn,
+      price:
+        parseFloat(baseTokenHistoryPrices[i].price) /
+        parseFloat(quoteTokenHistoryPrices[j].price),
+    });
+    if (baseBn === quoteBn) {
+      i++;
+      j++;
+    } else if (baseBn > quoteBn) {
+      j++;
+    } else {
+      i++;
+    }
+  }
+  const quoteTokenPrice = parseFloat(
+    quoteTokenHistoryPrices[quoteTokenHistoryPrices.length - 1].price
   );
+  while (i < baseTokenHistoryPrices.length) {
+    pairPrices.push({
+      blockNumber: parseInt(baseTokenHistoryPrices[i].blockNumber),
+      price: parseFloat(baseTokenHistoryPrices[i].price) / quoteTokenPrice,
+    });
+    i++;
+  }
+  const baseTokenPrice = parseFloat(
+    baseTokenHistoryPrices[baseTokenHistoryPrices.length - 1].price
+  );
+  while (j < quoteTokenHistoryPrices.length) {
+    pairPrices.push({
+      blockNumber: parseInt(quoteTokenHistoryPrices[j].blockNumber),
+      price: baseTokenPrice / parseFloat(quoteTokenHistoryPrices[j].price),
+    });
+    j++;
+  }
+
+  if (save) {
+    fs.writeFileSync(
+      `./${baseToken}-${quoteToken}.json`,
+      JSON.stringify(pairPrices, null, 4)
+    );
+  }
+  return pairPrices;
 }
 
 async function main() {
@@ -115,7 +176,12 @@ async function main() {
     address: tokensEthereum.WETH.address,
   });
   logger.info(wethPriceInUSD);
-  await saveHistoryPrices("0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84");
+  await fetchHistoryPrices(tokensEthereum.WETH.address, true);
+  await fetchHistoryPairPrices(
+    "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+    tokensEthereum.WETH.address,
+    true
+  );
   await requestLatestPrice({ address: tokensEthereum.WBTC.address });
   await requestLatestPrice({
     address: "0x8B3192f5eEBD8579568A2Ed41E6FEB402f93f73F",

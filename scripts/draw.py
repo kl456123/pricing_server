@@ -15,7 +15,7 @@ if __name__=='__main__':
     xfmt = mdates.DateFormatter('%m-%d %H:%M')
 
     plt.plot(xs, ys)
-    plt.title('price of WETH/USDC in 24h')
+    plt.title('price of eth/usd')
     ax = plt.gca()
     ax.xaxis.set_major_formatter(xfmt)
     xlocator = mdates.HourLocator(interval=1)
@@ -25,5 +25,5 @@ if __name__=='__main__':
     # Set xtick labels to appear every 15 minutes
     ax.xaxis.set_major_locator(xlocator);
 
-    plt.ylabel('weth/usdc price')
+    plt.ylabel('price')
     plt.show()
